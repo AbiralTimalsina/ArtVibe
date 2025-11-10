@@ -15,7 +15,6 @@ if (!JWT_SECRET) {
   throw new Error('FATAL ERROR: JWT_SECRET is not defined in environment variables.');
 }
 
-// Since we validated above, we can safely assert it's not null
 const SECRET = JWT_SECRET;
 
 if (process.env.NODE_ENV !== 'production') {
@@ -23,55 +22,40 @@ if (process.env.NODE_ENV !== 'production') {
   console.log('JWT_EXPIRES:', JWT_EXPIRES);
 }
 
-export const register = async (req: Request, res: Response) => {
+export const login = async (req: Request, res: Response) => {
   try {
-    const {
-      name,
-      email,
-      password,
-      role = "user",
-      phone,
-      address,
-      businessName,
-      businessLicense,
-    } = req.body;
+    const { email, password } = req.body;
 
-    // Input validation
-    if (!name || !email || !password) {
-      return res.status(400).json({ message: "Name, email, and password are required" });
+    if (!email || !password) {
+      return res.status(400).json({ 
+        success: false,
+        message: "Email and password are required" 
+      });
     }
 
-    if (role === "admin") {
-      return res.status(403).json({ message: "Admin registration is not allowed" });
+    const user = await UserModel.findOne({ email: email.toLowerCase().trim() }).select('+password');
+    if (!user) {
+      return res.status(401).json({ 
+        success: false,
+        message: "Invalid credentials" 
+      });
     }
 
-    const existingUser = await UserModel.findOne({ email });
-    if (existingUser) {
-      return res.status(409).json({ message: "Email already exists" });
+    const isMatch = await user.comparePassword(password);
+    if (!isMatch) {
+      return res.status(401).json({ 
+        success: false,
+        message: "Invalid credentials" 
+      });
     }
 
-    if (role === "vendor") {
-      if (!businessName || !businessLicense) {
-        return res.status(400).json({ 
-          message: "Business name and license are required for vendors" 
-        });
-      }
+    if (user.role === 'vendor' && !user.vendorVerified) {
+      return res.status(403).json({ 
+        success: false,
+        message: "Vendor account not verified yet. Please contact administrator." 
+      });
     }
 
-    const user = await UserModel.create({
-      name: name.trim(),
-      email: email.toLowerCase().trim(),
-      password,
-      role,
-      phone: phone?.trim(),
-      address: address?.trim(),
-      ...(role === "vendor" && { 
-        businessName: businessName.trim(),
-        businessLicense: businessLicense.trim()
-      }),
-    });
-
-    // Fixed jwt.sign call
     const token = jwt.sign(
       { 
         id: user._id.toString(),
@@ -83,25 +67,33 @@ export const register = async (req: Request, res: Response) => {
       } as jwt.SignOptions
     );
 
-    res.status(201).json({
+    const userResponse = {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      vendorVerified: user.vendorVerified,
+      verificationStatus: user.verificationStatus,
+      phone: user.phone,
+      address: user.address,
+      ...(user.role === "vendor" && {
+        businessName: user.businessName,
+        businessLicense: user.businessLicense
+      })
+    };
+
+    console.log('🔍 BACKEND - Full user response:', userResponse);
+
+    res.status(200).json({
       success: true,
       token,
-      user: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        vendorVerified: user.vendorVerified,
-        phone: user.phone,
-        address: user.address,
-        ...(user.role === "vendor" && {
-          businessName: user.businessName,
-          businessLicense: user.businessLicense
-        })
-      },
+      user: userResponse,
     });
   } catch (err: any) {
-    console.error('Registration error:', err);
-    
-    if (err.name === 'ValidationError') {
-      return res.stat
+    console.error('Login error:', err);
+    res.status(500).json({ 
+      success: false,
+      message: "Internal server error during login" 
+    });
+  }
+};
