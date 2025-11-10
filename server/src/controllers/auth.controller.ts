@@ -30,6 +30,10 @@ export const register = async (req: Request, res: Response) => {
       email,
       password,
       role = "user",
+      phone,
+      address,
+      businessName,
+      businessLicense,
     } = req.body;
 
     // Input validation
@@ -46,11 +50,25 @@ export const register = async (req: Request, res: Response) => {
       return res.status(409).json({ message: "Email already exists" });
     }
 
+    if (role === "vendor") {
+      if (!businessName || !businessLicense) {
+        return res.status(400).json({ 
+          message: "Business name and license are required for vendors" 
+        });
+      }
+    }
+
     const user = await UserModel.create({
       name: name.trim(),
       email: email.toLowerCase().trim(),
       password,
       role,
+      phone: phone?.trim(),
+      address: address?.trim(),
+      ...(role === "vendor" && { 
+        businessName: businessName.trim(),
+        businessLicense: businessLicense.trim()
+      }),
     });
 
     // Fixed jwt.sign call
@@ -73,6 +91,13 @@ export const register = async (req: Request, res: Response) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        vendorVerified: user.vendorVerified,
+        phone: user.phone,
+        address: user.address,
+        ...(user.role === "vendor" && {
+          businessName: user.businessName,
+          businessLicense: user.businessLicense
+        })
       },
     });
   } catch (err: any) {
@@ -126,6 +151,13 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
+    if (user.role === 'vendor' && !user.vendorVerified) {
+      return res.status(403).json({ 
+        success: false,
+        message: "Vendor account not verified yet. Please contact administrator." 
+      });
+    }
+
     // Fixed jwt.sign call
     const token = jwt.sign(
       { 
@@ -138,15 +170,27 @@ export const login = async (req: Request, res: Response) => {
       } as jwt.SignOptions // Type assertion
     );
 
+    const userResponse = {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      vendorVerified: user.vendorVerified,
+      verificationStatus: user.verificationStatus,
+      phone: user.phone,
+      address: user.address,
+      ...(user.role === "vendor" && {
+        businessName: user.businessName,
+        businessLicense: user.businessLicense
+      })
+    };
+
+    console.log('🔍 BACKEND - Full user response:', userResponse);
+
     res.status(200).json({
       success: true,
       token,
-      user: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
+      user: userResponse,
     });
   } catch (err: any) {
     console.error('Login error:', err);
