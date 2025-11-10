@@ -15,12 +15,89 @@ if (!JWT_SECRET) {
   throw new Error('FATAL ERROR: JWT_SECRET is not defined in environment variables.');
 }
 
+// Since we validated above, we can safely assert it's not null
 const SECRET = JWT_SECRET;
 
 if (process.env.NODE_ENV !== 'production') {
   console.log('JWT_SECRET: Loaded successfully');
   console.log('JWT_EXPIRES:', JWT_EXPIRES);
 }
+
+export const register = async (req: Request, res: Response) => {
+  try {
+    const {
+      name,
+      email,
+      password,
+      role = "user",
+    } = req.body;
+
+    // Input validation
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: "Name, email, and password are required" });
+    }
+
+    if (role === "admin") {
+      return res.status(403).json({ message: "Admin registration is not allowed" });
+    }
+
+    const existingUser = await UserModel.findOne({ email });
+    if (existingUser) {
+      return res.status(409).json({ message: "Email already exists" });
+    }
+
+    const user = await UserModel.create({
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      password,
+      role,
+    });
+
+    // Fixed jwt.sign call
+    const token = jwt.sign(
+      { 
+        id: user._id.toString(), // Convert ObjectId to string
+        role: user.role 
+      }, 
+      SECRET,
+      { 
+        expiresIn: JWT_EXPIRES 
+      } as jwt.SignOptions // Type assertion
+    );
+
+    res.status(201).json({
+      success: true,
+      token,
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+    });
+  } catch (err: any) {
+    console.error('Registration error:', err);
+    
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({ 
+        success: false,
+        message: Object.values(err.errors).map((e: any) => e.message).join(', ')
+      });
+    }
+    
+    if (err.code === 11000) {
+      return res.status(409).json({ 
+        success: false,
+        message: "Email already exists" 
+      });
+    }
+    
+    res.status(500).json({ 
+      success: false,
+      message: "Internal server error during registration" 
+    });
+  }
+};
 
 export const login = async (req: Request, res: Response) => {
   try {
@@ -49,45 +126,27 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
-    if (user.role === 'vendor' && !user.vendorVerified) {
-      return res.status(403).json({ 
-        success: false,
-        message: "Vendor account not verified yet. Please contact administrator." 
-      });
-    }
-
+    // Fixed jwt.sign call
     const token = jwt.sign(
       { 
-        id: user._id.toString(),
+        id: user._id.toString(), // Convert ObjectId to string
         role: user.role 
       }, 
       SECRET,
       { 
         expiresIn: JWT_EXPIRES 
-      } as jwt.SignOptions
+      } as jwt.SignOptions // Type assertion
     );
-
-    const userResponse = {
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      vendorVerified: user.vendorVerified,
-      verificationStatus: user.verificationStatus,
-      phone: user.phone,
-      address: user.address,
-      ...(user.role === "vendor" && {
-        businessName: user.businessName,
-        businessLicense: user.businessLicense
-      })
-    };
-
-    console.log('🔍 BACKEND - Full user response:', userResponse);
 
     res.status(200).json({
       success: true,
       token,
-      user: userResponse,
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
     });
   } catch (err: any) {
     console.error('Login error:', err);
