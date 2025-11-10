@@ -31,9 +31,32 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
     if (!user) return res.status(401).json({ message: 'User not found' });
 
     req.user = user;
-    next();
+    next(); // This should call authorizeRoles next
   } catch (err) {
     console.log('Token verification error:', err);
     return res.status(401).json({ message: 'Token invalid' });
   }
+};
+
+export const authorizeRoles = (...roles: UserRole[]) => {
+  return (req: AuthRequest, res: Response, next: NextFunction) => {
+    // return console too for testing
+    console.log('User:', req.user);
+    if (!req.user) {
+      console.log('User not found');
+      return res.status(401).json({ message: 'Please login first' });
+    }
+
+    if (!roles.includes(req.user.role)) {
+      console.log('Access denied');
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    if (req.user.role === 'vendor' && !req.user.vendorVerified) {
+      console.log('Vendor not verified');
+      return res.status(403).json({ message: 'Vendor not verified' });
+    }
+
+    next();
+  };
 };
